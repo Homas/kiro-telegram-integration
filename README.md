@@ -68,15 +68,52 @@ Configure via VS Code settings:
 
 The project includes two notification hooks (disabled by default) that send Telegram messages when Kiro is about to execute actions. These are one-way notifications — they don't block execution.
 
-| Hook | Covers |
-|---|---|
-| `Telegram Shell Notification` | Notifies when a shell command is about to run |
-| `Telegram Write Notification` | Notifies when a file is about to be written or edited |
+| Hook | File | Covers |
+|---|---|---|
+| `Telegram Shell Notification` | `.kiro/hooks/telegram-shell-approve.kiro.hook` | Shell commands |
+| `Telegram Write Notification` | `.kiro/hooks/telegram-write-approve.kiro.hook` | File writes and edits |
 
-To enable notifications:
+The hook files are included in the repository. To enable them, open the "Agent Hooks" section in Kiro's explorer sidebar and toggle on the hooks you want.
 
-1. Open the "Agent Hooks" section in Kiro's explorer sidebar.
-2. Toggle on the hooks you want.
+If you need to create them manually, add the following files:
+
+`.kiro/hooks/telegram-shell-approve.kiro.hook`:
+
+```json
+{
+  "enabled": false,
+  "name": "Telegram Shell Notification",
+  "description": "When a shell command is about to run, send a formatted notification to Telegram showing the command.",
+  "version": "1",
+  "when": {
+    "type": "preToolUse",
+    "toolTypes": ["shell"]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A shell command is about to be executed. Use the telegram_notify tool to send a notification. Format the message exactly like this:\n\n🔧 Pending Action\n\nType: Shell Command\nSummary: <describe what the command does>\nCommand: <the actual command>\n\nThen proceed normally — do NOT wait for a response or block execution."
+  }
+}
+```
+
+`.kiro/hooks/telegram-write-approve.kiro.hook`:
+
+```json
+{
+  "enabled": false,
+  "name": "Telegram Write Notification",
+  "description": "When a file write is about to happen, send a formatted notification to Telegram showing what is being changed.",
+  "version": "1",
+  "when": {
+    "type": "preToolUse",
+    "toolTypes": ["write"]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A file write is about to be executed. Use the telegram_notify tool to send a notification. Format the message exactly like this:\n\n📝 Pending Action\n\nType: File Write\nSummary: <describe what is being written or changed>\nFiles: <list the file paths>\n\nThen proceed normally — do NOT wait for a response or block execution."
+  }
+}
+```
 
 ## MCP Tools
 

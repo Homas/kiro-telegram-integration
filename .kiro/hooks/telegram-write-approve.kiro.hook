@@ -1,0 +1,16 @@
+{
+  "enabled": false,
+  "name": "Telegram Write Notification",
+  "description": "When a file write is about to happen, send a formatted notification to Telegram showing what is being changed.",
+  "version": "1",
+  "when": {
+    "type": "preToolUse",
+    "toolTypes": [
+      "write"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A file write is about to be executed. Use the telegram_notify tool to send a notification. Format the message exactly like this:\n\n📝 Pending Action\n\nType: File Write\nSummary: <describe what is being written or changed>\nFiles: <list the file paths>\n\nThen proceed normally — do NOT wait for a response or block execution."
+  }
+}
