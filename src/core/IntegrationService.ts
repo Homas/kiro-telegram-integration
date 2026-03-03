@@ -93,7 +93,7 @@ export class IntegrationService {
         resolve: (result) => {
           this.activeRequestIds.delete(requestId);
           if (result.status === 'timed_out') {
-            this.sender.editMessage(sent.messageId, '⏰ This request has expired.').catch(() => {});
+            this.sender.editMessageRemoveKeyboard(sent.messageId, '⏰ This request has expired.').catch(() => {});
           }
           resolve(result);
         },
@@ -135,7 +135,7 @@ export class IntegrationService {
         resolve: (result) => {
           this.activeRequestIds.delete(requestId);
           if (result.status === 'timed_out') {
-            this.sender.editMessage(sent.messageId, '⏰ This request has expired.').catch(() => {});
+            this.sender.editMessageRemoveKeyboard(sent.messageId, '⏰ This request has expired.').catch(() => {});
           }
           resolve(result);
         },

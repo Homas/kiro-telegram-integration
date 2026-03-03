@@ -1,8 +1,14 @@
 import type { TelegramConfig, TelegramUpdate, RoutingResult } from './types.js';
 import type { RequestRegistry } from './RequestRegistry.js';
 import type { MessageSender } from './MessageSender.js';
+import { existsSync, writeFileSync, readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// Signal files dir: project root is two levels up from dist/core/
+const SIGNALS_DIR = join(__dirname, '..', '..', '.telegram-signals');
 
 /**
  * Parse callback data encoded as `{requestId}:{action}`.
@@ -91,32 +97,54 @@ export class ResponseRouter {
    * Handle a callback query from an inline keyboard button tap.
    */
   private async handleCallbackQuery(update: TelegramUpdate): Promise<RoutingResult> {
-    const callbackQuery = update.callback_query!;
-    const parsed = parseCallbackData(callbackQuery.data);
+      const callbackQuery = update.callback_query!;
+      const parsed = parseCallbackData(callbackQuery.data);
 
-    if (!parsed) {
-      return { matched: false, error: 'Invalid callback data format' };
+      if (!parsed) {
+        return { matched: false, error: 'Invalid callback data format' };
+      }
+
+      const { requestId, action } = parsed;
+
+      // Always acknowledge the callback query to remove the loading indicator
+      await this.answerCallbackQuery(callbackQuery.id);
+
+      const status = action === 'approve' ? 'approved' as const : 'cancelled' as const;
+      const messageId = callbackQuery.message?.message_id;
+
+      // Check if this is a hook signal file request (from standalone script)
+      const signalHandled = this.tryResolveSignalFile(requestId, status);
+
+      // Check if the request is pending in the registry (from MCP tool calls)
+      if (this.registry.isPending(requestId)) {
+        this.registry.resolve(requestId, { requestId, status });
+      } else if (!signalHandled) {
+        // Neither signal file nor registry match — already resolved or expired
+        await this.sender.sendNotification(
+          '⏰ This request has already expired or been resolved.',
+        );
+        return { matched: false, requestId, error: 'Request already resolved or expired' };
+      }
+
+      // Edit the original message to show the result and remove the buttons
+      // (skip if signal file handler already edited it)
+      if (messageId && !signalHandled) {
+        const statusEmoji = status === 'approved' ? '✅' : '❌';
+        const statusText = status === 'approved' ? 'Approved' : 'Cancelled';
+        try {
+          await this.sender.editMessageRemoveKeyboard(
+            messageId,
+            `${statusEmoji} ${statusText}`,
+          );
+        } catch {
+          // Best-effort — don't fail the routing if the edit fails
+        }
+      }
+
+      return { matched: true, requestId };
     }
 
-    const { requestId, action } = parsed;
 
-    // Always acknowledge the callback query to remove the loading indicator
-    await this.answerCallbackQuery(callbackQuery.id);
-
-    // Check if the request is still pending
-    if (!this.registry.isPending(requestId)) {
-      // Request was already resolved or expired
-      await this.sender.sendNotification(
-        '⏰ This request has already expired or been resolved.',
-      );
-      return { matched: false, requestId, error: 'Request already resolved or expired' };
-    }
-
-    const status = action === 'approve' ? 'approved' as const : 'cancelled' as const;
-    this.registry.resolve(requestId, { requestId, status });
-
-    return { matched: true, requestId };
-  }
 
   /**
    * Handle a text reply to an information request message.
@@ -173,4 +201,42 @@ export class ResponseRouter {
       // Best-effort acknowledgment — don't fail the routing if this fails
     }
   }
+
+  /**
+   * Check for a signal file from the standalone approval script and write the result.
+   *
+   * The standalone script (scripts/telegram-approve.mjs) creates signal files
+   * in .telegram-signals/ with a requestId. When a callback comes in matching
+   * that requestId, we write the result back so the script can pick it up.
+   *
+   * @param requestId - The request ID from the callback data.
+   * @param status - The resolved status (approved or cancelled).
+   * @returns True if a signal file was found and updated.
+   */
+  private tryResolveSignalFile(requestId: string, status: 'approved' | 'cancelled'): boolean {
+    try {
+      const signalFile = join(SIGNALS_DIR, `${requestId}.json`);
+      if (!existsSync(signalFile)) return false;
+
+      const content = JSON.parse(readFileSync(signalFile, 'utf-8'));
+      if (content.status !== 'pending') return false;
+
+      writeFileSync(signalFile, JSON.stringify({ ...content, status }));
+
+      // Edit the Telegram message to show result with summary preserved
+      if (content.messageId && content.summary) {
+        const statusEmoji = status === 'approved' ? '✅' : '❌';
+        const statusLabel = status === 'approved' ? 'Approved' : 'Cancelled';
+        this.sender.editMessageRemoveKeyboard(
+          content.messageId,
+          `${statusEmoji} ${statusLabel}\n\n${content.summary}`,
+        ).catch(() => {});
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
 }

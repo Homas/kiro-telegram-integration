@@ -188,6 +188,28 @@ export class MessageSender {
   }
 
   /**
+   * Edit a message to update its text and remove the inline keyboard.
+   *
+   * Used after a confirmation request is approved or cancelled to show
+   * the result and remove the Approve/Cancel buttons.
+   *
+   * @param messageId - The ID of the message to edit.
+   * @param text - The new text content for the message.
+   */
+  async editMessageRemoveKeyboard(messageId: number, text: string): Promise<void> {
+    const url = `${TELEGRAM_API_BASE}/bot${this.config.botToken}/editMessageText`;
+    const body = {
+      chat_id: this.config.chatId,
+      message_id: messageId,
+      text: truncateMessage(text),
+      reply_markup: { inline_keyboard: [] },
+    };
+
+    await this.fetchWithRetry(url, body);
+  }
+
+
+  /**
    * Send a plain text notification message.
    *
    * @param text - The notification text to send.

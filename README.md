@@ -1,6 +1,6 @@
 # kiro-telegram-integration
 
-Remote approval and information gathering for [Kiro IDE](https://kiro.dev) via Telegram. When Kiro needs your confirmation or additional input, it sends a message to your Telegram chat — approve, cancel, or reply without leaving your phone.
+Remote notifications, information gathering, and approval requests for [Kiro IDE](https://kiro.dev) via Telegram. Get notified on your phone about what Kiro is doing, answer questions remotely, and request approvals — all without leaving Telegram.
 
 Delivered as an **MCP server** (primary) and a **VS Code extension** (secondary). Both share the same core library.
 
@@ -21,7 +21,7 @@ Delivered as an **MCP server** (primary) and a **VS Code extension** (secondary)
 ### 2. Install & Configure
 
 ```bash
-git clone <repo-url> kiro-telegram-integration
+git clone https://github.com/Homas/kiro-telegram-integration.git
 cd kiro-telegram-integration
 npm install
 npm run build
@@ -40,13 +40,21 @@ Add to your MCP configuration (e.g. `~/.kiro/settings/mcp.json`):
       "env": {
         "TELEGRAM_BOT_TOKEN": "<your-bot-token>",
         "TELEGRAM_CHAT_ID": "<your-chat-id>"
-      }
+      },
+      "autoApprove": [
+        "telegram_confirm",
+        "telegram_ask",
+        "telegram_notify",
+        "telegram_status"
+      ]
     }
   }
 }
 ```
 
-#### VS Code Extension
+Adding `autoApprove` ensures the Telegram tools don't trigger Kiro's own approval dialog when called by the agent.
+
+#### VS Code Extension (secondary)
 
 Configure via VS Code settings:
 
@@ -56,28 +64,19 @@ Configure via VS Code settings:
 | `kiroTelegram.chatId` | Telegram chat ID | — |
 | `kiroTelegram.timeoutMinutes` | Request timeout in minutes | `10` |
 
-## Architecture
+## Notification Hooks
 
-```
-src/
-├── core/              # Delivery-agnostic Telegram logic
-│   ├── ConfigManager  # Config loading, validation, connectivity check
-│   ├── MessageSender  # Message formatting, sending, retry logic
-│   ├── RequestRegistry# Pending request lifecycle & timeout management
-│   ├── UpdatePoller   # Long-polling for Telegram updates
-│   ├── ResponseRouter # Routes incoming updates to pending requests
-│   ├── IntegrationService # Public API consumed by adapters
-│   └── types          # Shared interfaces and type definitions
-├── mcp/               # MCP server adapter (primary)
-│   ├── server         # Entry point, stdio transport
-│   └── tools          # MCP tool definitions
-└── extension/         # VS Code extension adapter (secondary)
-    ├── extension      # Activate/deactivate lifecycle
-    ├── commands       # VS Code command registrations
-    └── statusBar      # Connection status indicator
-```
+The project includes two notification hooks (disabled by default) that send Telegram messages when Kiro is about to execute actions. These are one-way notifications — they don't block execution.
 
-Both adapters are thin wrappers that delegate to `IntegrationService`. The core library has zero knowledge of how it is hosted.
+| Hook | Covers |
+|---|---|
+| `Telegram Shell Notification` | Notifies when a shell command is about to run |
+| `Telegram Write Notification` | Notifies when a file is about to be written or edited |
+
+To enable notifications:
+
+1. Open the "Agent Hooks" section in Kiro's explorer sidebar.
+2. Toggle on the hooks you want.
 
 ## MCP Tools
 
@@ -127,7 +126,7 @@ Messages exceeding Telegram's **4096-character** limit are truncated at 4050 cha
 | No messages received | Confirm your Chat ID is correct. Send a message to your bot first, then re-check `getUpdates`. |
 | Responses not matching | Ensure you're replying to the correct message (use Telegram's reply feature for information requests). |
 | Timeout too short/long | Adjust `timeoutMs` in MCP env or `kiroTelegram.timeoutMinutes` in VS Code settings. |
-| MCP server won't start | Verify Node.js v18+ is installed (`node --version`). Check that `npx kiro-telegram-integration` runs without errors. |
+| MCP server won't start | Verify Node.js v18+ is installed (`node --version`). Check that `node dist/mcp/server.js` runs without errors. Ensure you ran `npm run build` first. |
 
 ## Security Considerations
 
@@ -139,6 +138,63 @@ Messages exceeding Telegram's **4096-character** limit are truncated at 4050 cha
   - Use a private chat with your bot rather than a group chat.
   - Do not share your bot token. If compromised, revoke it via BotFather (`/revoke`).
 - **No persistent storage**: Pending requests are held in memory only. No sensitive data is written to disk.
+
+## Development
+
+```bash
+npm install          # Install dependencies
+npm run build        # Compile TypeScript
+npm test             # Run tests (vitest)
+```
+
+## Architecture
+
+```
+├── src/
+│   ├── core/              # Delivery-agnostic Telegram logic
+│   │   ├── ConfigManager  # Config loading, validation, connectivity check
+│   │   ├── MessageSender  # Message formatting, sending, retry logic
+│   │   ├── RequestRegistry# Pending request lifecycle & timeout management
+│   │   ├── UpdatePoller   # Long-polling for Telegram updates
+│   │   ├── ResponseRouter # Routes updates to pending requests & signal files
+│   │   ├── IntegrationService # Public API consumed by adapters
+│   │   └── types          # Shared interfaces and type definitions
+│   ├── mcp/               # MCP server adapter (primary)
+│   │   ├── server         # Entry point, stdio transport
+│   │   └── tools          # MCP tool definitions
+│   └── extension/         # VS Code extension adapter (secondary)
+│       ├── extension      # Activate/deactivate lifecycle
+│       ├── commands       # VS Code command registrations
+│       └── statusBar      # Connection status indicator
+└── scripts/
+    └── telegram-approve.mjs  # Standalone approval script (see below)
+```
+
+Both adapters are thin wrappers that delegate to `IntegrationService`. The core library has zero knowledge of how it is hosted.
+
+## Standalone Approval Script
+
+`scripts/telegram-approve.mjs` is a self-contained approval script designed for use with Kiro `runCommand` hooks. It sends an Approve/Cancel message to Telegram and communicates with the MCP server via signal files in `.telegram-signals/`.
+
+The script requires a `.env` file in the project root (see `.env.example`):
+
+```
+TELEGRAM_BOT_TOKEN=your-bot-token
+TELEGRAM_CHAT_ID=your-chat-id
+```
+
+This script is not used by the default hooks but is available for custom workflows.
+
+## TODO: Remote Approval Workflow
+
+Kiro currently always shows its own approval dialog for shell commands and file writes, even when a hook has already authorized the action. This makes remote-only approval (approving exclusively from Telegram) not yet possible.
+
+The approval infrastructure is fully implemented:
+- `telegram_confirm` tool with Approve/Cancel inline keyboard
+- Signal file communication between the standalone script and MCP server's `ResponseRouter`
+- `askAgent` hooks that pass the actual command/file details to Telegram
+
+This will work end-to-end once Kiro supports bypassing its native approval dialog when a hook has already granted permission.
 
 ## Development
 
