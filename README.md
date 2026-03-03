@@ -66,18 +66,39 @@ Configure via VS Code settings:
 
 ## Notification Hooks
 
-The project includes two notification hooks (disabled by default) that send Telegram messages when Kiro is about to execute actions. These are one-way notifications — they don't block execution.
+The project includes notification hooks (disabled by default) that send Telegram messages when Kiro is about to execute actions. These are one-way notifications — they don't block execution.
+
+There are two variants:
+
+### askAgent hooks (recommended)
+
+These use the MCP server's `telegram_notify` tool. They require the MCP server to be running.
 
 | Hook | File | Covers |
 |---|---|---|
 | `Telegram Shell Notification` | `.kiro/hooks/telegram-shell-approve.kiro.hook` | Shell commands |
 | `Telegram Write Notification` | `.kiro/hooks/telegram-write-approve.kiro.hook` | File writes and edits |
 
-The hook files are included in the repository. To enable them, open the "Agent Hooks" section in Kiro's explorer sidebar and toggle on the hooks you want.
+### runCommand hooks (standalone)
 
-If you need to create them manually, add the following files:
+These call `scripts/telegram-notify.mjs` directly. They work independently of the MCP server and only need a `.env` file with your bot credentials.
 
-`.kiro/hooks/telegram-shell-approve.kiro.hook`:
+| Hook | File | Covers |
+|---|---|---|
+| `Telegram Shell Notification (Script)` | `.kiro/hooks/telegram-shell-notify-script.kiro.hook` | Shell commands |
+| `Telegram Write Notification (Script)` | `.kiro/hooks/telegram-write-notify-script.kiro.hook` | File writes and edits |
+
+### Enabling hooks
+
+All hook files are included in the repository. To enable them, open the "Agent Hooks" section in Kiro's explorer sidebar and toggle on the hooks you want.
+
+Enable only one variant at a time per tool type (e.g. don't enable both the askAgent and script shell hooks simultaneously).
+
+### Manual hook creation
+
+If you need to create them manually, add the following files under `.kiro/hooks/`:
+
+**askAgent variant** — `.kiro/hooks/telegram-shell-approve.kiro.hook`:
 
 ```json
 {
@@ -96,7 +117,7 @@ If you need to create them manually, add the following files:
 }
 ```
 
-`.kiro/hooks/telegram-write-approve.kiro.hook`:
+**askAgent variant** — `.kiro/hooks/telegram-write-approve.kiro.hook`:
 
 ```json
 {
@@ -111,6 +132,44 @@ If you need to create them manually, add the following files:
   "then": {
     "type": "askAgent",
     "prompt": "A file write is about to be executed. Use the telegram_notify tool to send a notification. Format the message exactly like this:\n\n📝 Pending Action\n\nType: File Write\nSummary: <describe what is being written or changed>\nFiles: <list the file paths>\n\nThen proceed normally — do NOT wait for a response or block execution."
+  }
+}
+```
+
+**runCommand variant** — `.kiro/hooks/telegram-shell-notify-script.kiro.hook`:
+
+```json
+{
+  "enabled": false,
+  "name": "Telegram Shell Notification (Script)",
+  "description": "When a shell command is about to run, send a notification to Telegram via the standalone script.",
+  "version": "1",
+  "when": {
+    "type": "preToolUse",
+    "toolTypes": ["shell"]
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "node scripts/telegram-notify.mjs \"Shell Command\""
+  }
+}
+```
+
+**runCommand variant** — `.kiro/hooks/telegram-write-notify-script.kiro.hook`:
+
+```json
+{
+  "enabled": false,
+  "name": "Telegram Write Notification (Script)",
+  "description": "When a file write is about to happen, send a notification to Telegram via the standalone script.",
+  "version": "1",
+  "when": {
+    "type": "preToolUse",
+    "toolTypes": ["write"]
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "node scripts/telegram-notify.mjs \"File Write\""
   }
 }
 ```
